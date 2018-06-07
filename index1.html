@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+</head>
+<body>
+    <div id="app">
+        <h2><p>{{name}}</p></h2>
+        <p>{{age}}</p>
+    </div>
+</body>
+<script>
+function Vue(options){
+    this.el = options.el;
+    this.data = options.data;
+    this.watcher = {};
+
+    // 将obj里所有的属性都进行监听
+    Object.keys(this.data).forEach(key=>{
+        this.defineProperty(this.data, key, this.data[key]);
+    });
+
+    // 解析DOM
+    this.compile();
+}
+
+Vue.prototype = {
+    defineProperty(obj, key, val){
+        let self = this;
+        Object.defineProperty(obj, key, {
+            enumerable: true, // 是否出现对象的枚举属性中
+            configurable: false, // 
+            get(){ // 获取key值时触发
+                console.log( 'get value: '+val );
+                return val;
+            },
+            set(newVal){ // 给当前key设置值时触发
+                if(val!==newVal){
+                    console.log(val+' --> '+newVal);
+                    val = newVal;
+                    // console.log( self );
+                    // 拿出在watcher中保存的函数，然后更新
+                    self.watcher[key](newVal);
+                }
+            }
+        })
+    },
+
+    compile(){
+        // 解析DOM视图中双括号之间的内容
+        let ele = document.querySelector(this.el);
+
+        [].slice.call(ele.childNodes).forEach(node=>{
+            let reg = /\{\{(.*)\}\}/,
+                text = node.textContent;
+            
+            if( reg.test(text) ){
+                let key = reg.exec(text)[1]; // 获取到key
+                node.textContent = this.data[key]; // data中存储的key值渲染到视图中
+
+                // 定义一个对应key的函数，在defineProperty中的set进行调用
+                this.watcher[key]=(newVal)=>{
+                    node.textContent = newVal;
+                }
+            }
+        })
+    }
+}
+
+let app = new Vue({
+    el: '#app',
+    data: {
+        name: 'wenzi',
+        age: 28
+    }
+});
+
+// 2000ms后更新
+setTimeout(()=>{
+    app.data.name = 'skeetershi';
+    app.data.age = Date.now();
+}, 2000)
+</script>
+</html>
