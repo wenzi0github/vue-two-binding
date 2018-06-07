@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>一个简单的监听器</title>
+</head>
+<body>
+    <div id="app">
+        <h2 class="name">{{name}}</h2>
+    </div>
+</body>
+<script>
+function Observer(data){
+    this.walk(data);
+}
+Observer.prototype = {
+    walk(data){
+        if( !data || typeof data!=='object' ){
+            return false;
+        }
+        Object.keys(data).forEach(key=>{
+            this.defineProperty(data, key, data[key]);
+        })
+    },
+    defineProperty(data, key, val){
+        this.walk(val);
+
+        let dep = new Dep();
+        Object.defineProperty(data, key, {
+            enumerable: true,
+            configurable: false,
+            get(){ // Dep.target存储的就是Watcher实例
+                if(Dep.target){
+                    dep.addSub(Dep.target);
+                }
+
+                return val;
+            },
+            set(newVal){
+                if(val!==newVal){
+                    val = newVal;
+                    dep.notify();
+                }
+            }
+        })
+    }
+}
+
+function Dep(){
+    this.subs = [];
+}
+
+Dep.prototype = {
+    addSub(watcher){
+        this.subs.push(watcher);
+    },
+
+    notify(){
+        this.subs.forEach(watcher=>{
+            watcher.run();
+        })
+    }
+};
+
+// vm Vue的实例
+// exp data中的key
+// cb 回调函数
+// options
+function Watcher(vm, exp, cb, options){
+    this.vm = vm;
+    this.exp = exp;
+    this.cb = cb;
+
+    this.value = this.get(); // 获取key对应的值，同时将watcher添加到Dep的队列中
+}
+
+Watcher.prototype = {
+    get(){
+        Dep.target = this;
+        let value = this.vm[this.exp];
+        Dep.target = null;
+        return value;
+    },
+
+    update(){
+        this.run();
+    },
+
+    run(){
+        let value = this.vm[this.exp]; // 新值
+
+        // 当执行run方法时，value值与之前保存的value值不同时
+        if( value!==this.value ){
+            let oldValue = this.value;
+            this.value = value;
+
+            this.cb.call(this.vm, value, oldValue); // 执行在初始化时添加的回调函数
+        }
+    }
+};
+
+function Vue(options){
+    this.el = options.el;
+    this.data = options.data;
+    this.watcher = {};
+
+    // 将obj里所有的属性都进行监听
+    Object.keys(this.data).forEach(key=>{
+        this.proxyKeys(key); // 添加代理
+    });
+
+    new Observer(this.data);
+
+    let exp = 'name',
+        name = document.querySelector(this.el+' .'+exp);
+
+    // console.log(name);
+    name.innerHTML = this.data[exp];
+    new Watcher(this, exp, value=>{
+        name.innerHTML = value;
+    })
+}
+
+Vue.prototype = {
+    // 其他方法不变，添加一个代理方法，将data里的属性定义到this上，即Vue的实例中
+    proxyKeys(key){
+        let self = this;
+
+        Object.defineProperty(this, key, {
+            enumerable: false,
+            configurable: true,
+            get(){
+                // console.log(self);
+                return self.data[key];
+            },
+            set(newVal){
+                self.data[key] = newVal;
+            }
+        })
+    }
+}
+
+
+let app = new Vue({
+    el: '#app',
+    data:{
+        name: 'wenzi'
+    }
+})
+
+setTimeout(()=>{
+    app.name = 'skeeter';
+}, 2000)
+</script>
+</html>
