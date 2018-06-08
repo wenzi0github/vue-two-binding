@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Vue的双向绑定最终版</title>
+    <style>
+        input{
+            border: 1px solid #eee;
+            font-size: 20px;
+            padding: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <h1>{{username}}</h1>
+        <p><input type="text" v-model="username"></p>
+        <p>{{timestamp}}</p>
+        <p><input type="button" value="点击获取当前时间" v-on:click="getNowTime"></p>
+    </div>
+</body>
+<script>
+function Vue(options){
+    this.el = options.el;
+    this.data = options.data;
+    this.methods = options.methods;
+    // Object.assign(this, options)
+
+    // 将obj里所有的属性都进行监听
+    Object.keys(this.data).forEach(key=>{
+        this.proxyKeys(key);
+        // this.defineProperty(this.data, key, this.data[key]);
+    });
+    new Observer(this.data);
+    new Compiler(this, this.el);
+}
+
+function Observer(data){
+    this.walk(data);
+}
+Observer.prototype = {
+    walk(data){
+        if( !data || typeof data!=='object' ){
+            return false;
+        }
+        Object.keys(data).forEach(key=>{
+            this.defineProperty(data, key, data[key]);
+        })
+    },
+    defineProperty(data, key, val){
+        this.walk(val);
+
+        let dep = new Dep();
+        Object.defineProperty(data, key, {
+            enumerable: true, // 是否出现对象的枚举属性中
+            configurable: false, // 
+            get(){ // Dep.target存储的就是Watcher实例
+                if(Dep.target){
+                    dep.addSub(Dep.target);
+                }
+                return val;
+            },
+            set(newVal){ // 给当前key设置值时触发
+                if(val!==newVal){
+                    val = newVal;
+                    dep.notify();
+                }
+            }
+        })
+    }
+}
+
+function Dep(){
+    this.subs = [];
+}
+
+Dep.prototype = {
+    addSub(watcher){
+        this.subs.push(watcher);
+    },
+
+    notify(){
+        this.subs.forEach(watcher=>{
+            watcher.run();
+        })
+    }
+};
+
+function Watcher(vm, exp, cb, options){
+    this.vm = vm;
+    this.exp = exp;
+    this.cb = cb;
+
+    this.value = this.get(); // 获取key对应的值，同时将watcher添加到Dep的队列中
+}
+
+Watcher.prototype = {
+    get(){
+        Dep.target = this;
+        let value = this.vm[this.exp];
+        Dep.target = null;
+        return value;
+    },
+
+    update(){
+        this.run();
+    },
+
+    run(){
+        let value = this.vm[this.exp]; // 新值
+
+        // 当执行run方法时，value值与之前保存的value值不同时
+        if( value!==this.value ){
+            let oldValue = this.value;
+            this.value = value;
+
+            this.cb.call(this.vm, value, oldValue); // 执行在初始化时添加的回调函数
+        }
+    }
+};
+
+function Compiler(vm, el){
+    this.vm = vm;
+	this.el = document.querySelector(el);
+	this.fragment = null;
+	this.init();
+}
+
+Compiler.prototype = {
+    init(){
+        if (this.el) {
+			this.fragment = this.nodeToFragment(this.el); // 文档片段
+			this.compileElement(this.fragment); // 解析
+			this.el.appendChild(this.fragment); // 将文档片段添加到视图中
+		} else {
+			console.log('Dom元素不存在');
+		}
+    },
+
+    // 将DOM节点转为文档片段
+    nodeToFragment(el){
+        let fragment = document.createDocumentFragment();
+        let child = el.firstChild;
+        while (child) {
+            // 将Dom元素移入fragment中
+            // appendChild: 如果被插入的节点已经存在于当前文档的文档树中
+            // 则那个节点会首先从原先的位置移除,然后再插入到新的位置.
+            fragment.appendChild(child);
+            child = el.firstChild
+        }
+        return fragment;
+    },
+
+    // 解析指令
+    compileElement(fragment){
+        var childNodes = fragment.childNodes;
+
+        [].slice.call(childNodes).forEach(node=>{
+            var reg = /\{\{(.*)\}\}/; // 双括号
+            var text = node.textContent; // 节点中的文本值
+            
+            if (this.isElementNode(node)) {
+                // 当前节点为元素节点
+                
+                // 解析当前元素节点中的attr属性 v-*
+                this.compileAttr(node);
+            } else if (this.isTextNode(node) && reg.test(text)) {
+                // 判断是否是符合这种形式{{}}的指令
+                // reg.exec(text)[1] 解析出双括号中的属性名
+                this.compileText(node, reg.exec(text)[1]); 
+            }
+
+            // 继续递归遍历当前节点的子节点
+            if (node.childNodes && node.childNodes.length) {
+                this.compileElement(node); 
+            }
+        });
+    },
+
+    // 解析节点上的属性
+    compileAttr(node){
+        var nodeAttrs = node.attributes; // 获取当前节点上所有的属性
+        var self = this;
+
+        // 对这些属性进行遍历，如果是带有v-的属性则再进行细分
+        [].slice.call(nodeAttrs).forEach(attr => {
+            // console.dir(attr);
+            let attr_name = attr.name;
+            if (/v\-/.test(attr_name)) {
+                // v-* 的指令
+                let exp = attr.value;
+                let dir = attr_name.substring(2); // 获取v-*后面*的具体值
+
+                if (/on\:/.test(dir)) {
+                    // 当前为v-on:event类型
+                    // 绑定事件
+                    self.compileEvent(node, self.vm, exp, dir);
+                } else {
+                    // v-model
+                    self.compileModel(node, self.vm, exp, dir)
+                }
+
+                // 操作完成后删除当前v-*的属性
+                node.removeAttribute(attr_name);
+            }
+        })
+    },
+
+    // 为model绑定input事件
+    compileModel(node, vm, exp, dir) {
+        let self = this;
+        let val = this.vm[exp];
+        node.value = val;
+        new Watcher(this.vm, exp, value => {
+            node.value = value;
+        });
+
+        // 添加input标签
+        node.addEventListener('input', e => {
+            let newVal = e.target.value;
+            if (val == newVal) {
+                return false;
+            }
+            self.vm[exp] = newVal;
+            val = newVal;
+        }, false);
+    },
+
+    // 添加对应的事件，并绑定回调函数
+    compileEvent(node, vm, exp, dir) {
+        let eventType = dir.split(':')[1];
+
+        let cb = vm.methods && vm.methods[exp];
+        if (eventType && cb) {
+            node.addEventListener(eventType, cb.bind(vm), false)
+        } else {
+            console.error('Vue no method: ' + exp);
+        }
+    },
+
+    // node 当前的文档节点
+    // exp 节点中{{}}的属性名
+    compileText(node, exp) {
+        let val = this.vm[exp]; // 获取到在Vue中data已定义的属性
+        node.textContent = val; // 将初始化的数据初始化到视图中
+        // console.log( exp );
+        new Watcher(this.vm, exp, value=>{ // 生成订阅器并绑定更新函数
+            node.textContent = value;
+        });
+    },
+
+    isElementNode(node){
+        return node.nodeType === 1;
+    },
+
+    // 是否是文本节点
+    isTextNode(node) {
+        return node.nodeType == 3;
+    }
+};
+
+Vue.prototype = {
+    // 代理
+    proxyKeys(key){
+        let self = this;
+
+        Object.defineProperty(this, key, {
+            enumerable: false,
+            configurable: true,
+            get(){
+                // console.log(self);
+                return self.data[key];
+            },
+            set(newVal){
+                self.data[key] = newVal;
+            }
+        })
+    },
+    
+    defineProperty(obj, key, val){
+        let self = this;
+        Object.defineProperty(obj, key, {
+            enumerable: true, // 是否出现对象的枚举属性中
+            configurable: false, // 
+            get(){ // 获取key值时触发
+                console.log( 'get value: '+val );
+                return val;
+            },
+            set(newVal){ // 给当前key设置值时触发
+                if(val!==newVal){
+                    console.log(val+' --> '+newVal);
+                    val = newVal;
+                    // console.log( self );
+                    // 拿出在watcher中保存的函数，然后更新
+                    self.watcher[key](newVal);
+                }
+            }
+        })
+    }
+}
+
+let app = new Vue({
+    el: '#app',
+    data: {
+        username: 'wenzi',
+        timestamp: '',
+    },
+    methods:{
+        getNowTime: function(){
+            this.timestamp = (new Date()).toLocaleTimeString();
+        }
+    }
+});
+</script>
+</html>
